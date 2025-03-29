@@ -1,0 +1,12 @@
+name = "PODPotential"
+uuid = "9e027556-dd89-4fc9-ac62-4087c08679bc"
+authors = ["Spencer Wyant <17836774+swyant@users.noreply.github.com>"]
+version = "0.1.0"
+
+[deps]
+AtomsBase = "a963bdd2-2df7-4f54-a1ee-49d51e6be12a"
+Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
+
+[compat]
+AtomsBase = "0.5.1"
+Unitful = "1.22.0"

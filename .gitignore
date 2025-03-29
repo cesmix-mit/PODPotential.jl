@@ -1,0 +1,8 @@
+Manifest.toml
+LocalPreferences.toml
+
+# LAMMPS artifacts
+log.lammps
+
+# MacOS
+.DS_Store
