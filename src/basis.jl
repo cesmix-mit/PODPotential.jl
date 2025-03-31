@@ -27,18 +27,11 @@ end
 struct PODBasis
     params::PODParams
     Φ::Matrix{Float64}
-    S::Vector{Float64}
-    A::Matrix{Float64}
-    Φ_ordered::Matrix{Float64}
-    Q::Matrix{Float64}
-    orthonorm_Φ::Matrix{Float64}
 
     # inner constructor will be needed to enforce Nr3 <=Nr2, etc.
     function PODBasis(params)
-        #Φ = init2body(params)
-        #return new(params,Φ)
-        Φ,S,A,Φ_ordered,Q, orthonorm_Φ = init2body(params)
-        return new(params,Φ,S,A,Φ_ordered,Q,orthonorm_Φ)
+        Φ = init2body(params)
+        return new(params,Φ)
    end
 end 
 
@@ -59,63 +52,45 @@ end
 
 function compute_global_descriptors(sys, basis::PODBasis;
                                    neighbors=nothing)
-
-    ld = compute_local_descriptors(sys,basis;neighbors=neighbors)
-    gd = sum(ld) # This won't be right when ld is a matrix 
-    gd 
 end
 
 function compute_force_descriptors(sys, basis::PODBasis;
                                    neighbors=nothing)
 end
 
+# initialization only, can be done on CPU
 function init2body(params)
-    
-    ns = params.ns
 
-    # instantiate Phi, Lambda
-    #Φ = Matrix{Float64}(undef,ns,ns)
-    #λ = Vector{Float64}(undef,ns)
-
-    #eigenvaluedecomposition!(Φ,λ,2000,params)
-    #Φ = eigenvaluedecomposition!(2000,params)
-    #return Φ
-   
-    Φ,S,A,Φ_ordered,Q,orthonorm_Φ = eigenvaluedecomposition!(2000,params)
-    return Φ,S,A,Φ_ordered,Q,orthonorm_Φ
+    Φ = eigenvaluedecomposition!(2000,params)
+    return Φ   
 end
 
-#function eigenvaluedecomposition!(Φ,λ,N,params)
+# initialization only, can be done on CPU
 function eigenvaluedecomposition!(N,params)
     ns = params.ns    
     rin = params.rin
     rcut = params.rcut
-    # better as a matrix, but a lot of the logic in `snapshots`
-    # assumes it's a contiguous vector 
+
+    # `snapshots` assumes S is a contiguous vector 
     S = Vector{Float64}(undef,N*ns)
+
     xij = [(rin + 1e-6) + (rcut - rin - 1e-6) * (i / (N - 1)) for i in 0:(N-1)]
 
     snapshots!(S,xij,N, params)
-    S_out = deepcopy(S)
     
     # convert to a matrix for simplicity
     S = reshape(S,N,params.ns)
 
     # Compute S^TS (i.e. covariance matrix) 
     A = (1/N).*(S'*S)
-    A_out = deepcopy(A)
     
     #Get eigenvectors
     _λ, Φ = eigen(Symmetric(A,:U), sortby=-)
 
-    Φ_ordered = deepcopy(Φ)
-    
     # project snapshots onto orthogonal basis
     Q = S*Φ
-    Q_out = deepcopy(Q)
     
     # compute area to normalize the eignevectors
-
     # should be the same value at every entry?
     xij_diff  = [xij[i+1]-xij[i] for i in 1:N-1]
     for m in 1:ns
@@ -125,9 +100,7 @@ function eigenvaluedecomposition!(N,params)
         end
         Φ[:,m] ./= sqrt(area)
     end
-
-    orthonorm_Φ = deepcopy(Φ)
-    
+   
     # enforce consistent signs for eigenvectors
     for m in 1:ns
         if Φ[m,m] < 0.0
@@ -135,10 +108,10 @@ function eigenvaluedecomposition!(N,params)
         end
     end
 
-    #return Φ
-    return Φ, S_out, A_out, Φ_ordered, Q_out, orthonorm_Φ
+    return Φ
 end
 
+# initialization only, can be done on CPU
 function snapshots!(S,xij,N, params)
     rcut = params.rcut 
     rin  = params.rin

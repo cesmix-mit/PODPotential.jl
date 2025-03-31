@@ -16,20 +16,20 @@ function potential_energy(sys, calc::POD_Potential;
                           neighbors=nothing,
                           kwargs...) 
 
-    gd = compute_global_descriptors(sys,calc;neighbors=neighbors)
-    pe = gd ⋅ calc.β
+    #gd = compute_global_descriptors(sys,calc;neighbors=neighbors)
+    #pe = gd ⋅ calc.β
 end
 
 function forces(sys, calc::POD_Potential;
                 neighbors=nothing,
                 kwargs...)
 
-    fd = compute_force_descriptors(sys,calc;neighbors=neighbors)  
-    return nothing
+    #fd = compute_force_descriptors(sys,calc;neighbors=neighbors)  
+    #return nothing
 end
 
 function virial(sys,calc::POD_Potential;
                 neighbors=nothing,
                 kwargs...)
-    error("virial isn't supported for PODPotential yet")
+    error("virial isn't currently supported for POD_Potential")
 end
