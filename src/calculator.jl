@@ -2,7 +2,7 @@ using JLD2: load
 
 struct POD_Potential
     basis::PODBasis
-    β::Vector{Float64}
+    coeff::Vector{Float64}
 end
 
 struct LAMMPS_State 
@@ -16,20 +16,20 @@ struct LAMMPS_State
 end
 
 function LAMMPS_State(jld_file::String)
-   x,type,map,inum,ilist,numneigh,firstneigh = load(jld_file,"x", 
-                                                             "type",
-                                                             "map",
-                                                             "inum",
-                                                             "ilist",
-                                                             "numneigh",
-                                                             "firstneigh")
-   return LAMMPS_State(x,type,map,inum,ilist,numneigh,firstneigh)
+    x,type,map,inum,ilist,numneigh,firstneigh = load(jld_file,"x",
+                                                              "type",
+                                                              "map",
+                                                              "inum",
+                                                              "ilist",
+                                                              "numneigh",
+                                                              "firstneigh")
+    return LAMMPS_State(x,type,map,inum,ilist,numneigh,firstneigh)
 end
 
 
 function lammps_compute(state::LAMMPS_State, podpot::POD_Potential)
     
-    # everything is implicitly 0-indexed, I adjust accordingly throughout the code
+    # state fields are implicitly 0-indexed, I adjust accordingly throughout the code
     x = state.x
     atomtypes = state.type
     inum = state.inum
