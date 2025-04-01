@@ -5,6 +5,11 @@ struct POD_Potential
     coeff::Vector{Float64}
 end
 
+function POD_Potential(basis::PODBasis, coeff_fname::String)
+    coeffs = vec(readdlm(coeff_fname, ' '; skipstart=1)) 
+    POD_Potential(basis,coeffs)
+end
+
 struct LAMMPS_State 
     x::Matrix{Float64}
     type::Vector{Int64}
@@ -40,7 +45,8 @@ function lammps_compute(state::LAMMPS_State, podpot::POD_Potential)
 
     rcut = podpot.basis.params.rcut
     rcutsq = rcut^2
-    
+
+    # pre-compute nijmax    
     nijmax = 0
     for ii in 1:inum
         i = ilist[ii] + 1 # pre-adjust to 1-indexing
@@ -49,8 +55,15 @@ function lammps_compute(state::LAMMPS_State, podpot::POD_Potential)
         if nijmax < jnum
             nijmax = jnum
         end
+    end
+    
+    fij1 = Vector{Float64}(undef,3*nijmax)
 
-        rij1, ai1, aj1, ti1, tj1 nij, = lammpsNeighborList(x,
+    for ii in 1:inum
+        i = ilist[ii] + 1 # pre-adjust to 1-indexing
+        jnum = numneigh[i]
+
+        rij1, ai1, aj1, ti1, tj1, nij = lammpsNeighborList(x,
                                                            firstneigh, 
                                                            atomtypes,
                                                            elem_map,
@@ -59,13 +72,12 @@ function lammps_compute(state::LAMMPS_State, podpot::POD_Potential)
                                                            i,
                                                            nijmax) # extra argument here
 
-        evdwl, fij1 = peratomenergyforce2(rij1,ti1,tj1,nij,podpot)
-
+        evdwl = peratomenergyforce2!(fij1,rij1,ti1,tj1,nij,podpot,basis,podpot.coeff)
     end
 end
 
 function lammpsNeighborList(x, firstneigh, atomtypes,elem_map, numneigh, rcutsq, gi, nijmax)
-    # allocation step 
+    # TODO allocation step, need to change to pre-allocate
     ti1 = Vector{Int64}(undef,nijmax)
     tj1 = Vector{Int64}(undef,nijmax)
     ai1 = Vector{Int64}(undef,nijmax)
@@ -74,23 +86,23 @@ function lammpsNeighborList(x, firstneigh, atomtypes,elem_map, numneigh, rcutsq,
  
     # gi already adjusted to 1-indexing
     nij = 0 # acts as both an index and count, so don't pre-adjust
-    itype = map[atomtypes[gi]] + 1 # this +1 is in the original code
+    itype = elem_map[atomtypes[gi]] + 1 # this +1 is in the original code
     ti1[nij+1] = itype; # adjust to 1-indexing
     m = numneigh[gi];
     for l in 1:m
         gj = firstneigh[gi][l] + 1 # pre-adjust to 1-indexing
-        delx = x[gj][1] - x[gi][1]
-        dely = x[gj][2] - x[gi][2]
-        delz = x[gj][3] - x[gi][3]
+        delx = x[gj,1] - x[gi,1]
+        dely = x[gj,2] - x[gi,2]
+        delz = x[gj,3] - x[gi,3]
         rsq = delx*delx + dely*dely + delz*delz
         if rsq < rcutsq && rsq > 1e-20
-            rij1[nij*3 +1] = delx
-            rij1[nij*3 +2] = dely
-            rij1[nij*3 +3] = delz
+            rij1[nij*3+1] = delx
+            rij1[nij*3+2] = dely
+            rij1[nij*3+3] = delz
             ai1[nij+1] = gi 
             aj1[nij+1] = gj 
             ti1[nij+1] = itype
-            tj1[nj1+1] = map[atomtypes[gi]] + 1
+            tj1[nij+1] = elem_map[atomtypes[gi]] + 1
             nij += 1
         end
     end 
