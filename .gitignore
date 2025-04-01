@@ -6,3 +6,5 @@ log.lammps
 
 # MacOS
 .DS_Store
+
+*.jld2

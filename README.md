@@ -1,4 +1,4 @@
-As direct a port of the ML-POD potential originally written in C++ in LAMMPS.
+Directly replicating LAMMPS logic of the ML-POD potential.
 
 Goal is 3-body, at most 4-body. Ignoring the quadratic descriptors
 Not considering environment-dependent descriptors or Gaussian snapshots.
