@@ -49,7 +49,7 @@ function peratom_length(basis::PODBasis)
     nelements = length(basis.params.species)
     
     # one-body and two-body
-    return nelements + nrbf2*nelements
+    return 1 + nrbf2*nelements
 end
 
 function Base.length(basis::PODBasis)
@@ -59,13 +59,15 @@ function Base.length(basis::PODBasis)
 end
 
 function peratomenergyforce2!(fij, rij,ti,tj,Nj,basis,coeff)
-
+    
+    #TODO make another struct that keeps all these different counts and just pass that around instead of params
     nCoeffPerElement = peratom_length(basis)
     nelements = length(basis.params.species)
     
     nl2 = basis.params.nrbf2 * nelements 
 
-
+    # initialize energies and forces to 0.0
+    e = 0.0
     for n in 1:3*Nj
         fij[n] = 0.0
     end
@@ -79,10 +81,11 @@ function peratomenergyforce2!(fij, rij,ti,tj,Nj,basis,coeff)
 
     # This logic only works for the 2-body, will update for 3-body/4-body
     d2 = bd = Vector{Float64}(undef,nl2)
-    rbf = Vector{Float64}(undef,Nj*basis.params.nrbf2)
-    rbfx = Vector{Float64}(undef,Nj*basis.params.nrbf2)
-    rbfy = Vector{Float64}(undef,Nj*basis.params.nrbf2)
-    rbfz = Vector{Float64}(undef,Nj*basis.params.nrbf2)
+    cb2 = cb = bdd = Vector{Float64}(undef, nl2)
+    #rbf = Vector{Float64}(undef,Nj*basis.params.nrbf2)
+    #rbfx = Vector{Float64}(undef,Nj*basis.params.nrbf2)
+    #rbfy = Vector{Float64}(undef,Nj*basis.params.nrbf2)
+    #rbfz = Vector{Float64}(undef,Nj*basis.params.nrbf2)
 
     rbft = Vector{Float64}(undef,Nj*basis.params.ns)
     rbfxt = Vector{Float64}(undef,Nj*basis.params.ns)
@@ -90,6 +93,24 @@ function peratomenergyforce2!(fij, rij,ti,tj,Nj,basis,coeff)
     rbfzt = Vector{Float64}(undef,Nj*basis.params.ns)
     
     radialbasis!(rbft,rbfxt,rbfyt,rbfzt,rij,basis.params,Nj)
+    
+    # Apologies, apologies... this will need to be updated for GPU
+    rbf =  reshape( reshape(rbft, Nj, basis.params.ns)*basis.Φ[:, 1:basis.params.nrbf2], :)
+    rbfx = reshape( reshape(rbfxt, Nj, basis.params.ns)*basis.Φ[:, 1:basis.params.nrbf2],:)
+    rbfy = reshape( reshape(rbfyt, Nj, basis.params.ns)*basis.Φ[:, 1:basis.params.nrbf2],:)
+    rbfz = reshape( reshape(rbfzt, Nj, basis.params.ns)*basis.Φ[:, 1:basis.params.nrbf2],:)
+
+    if nl2> 0 && Nj > 2 
+        twobodydesc!(d2, rbf, tj, Nj, basis.params) # extra argument
+    end
+
+    e +=  peratombase_coefficients(cb,bd,ti,basis,coeff) # two extra arguments
+
+    if nl2> 0 && Nj > 2 
+        twobody_forces!(fij,cb2, rbfx, rbfy, rbfz, tj, Nj, basis.params.nrbf2) # extra arguments
+    end
+
+    return e
 end
 
 function radialbasis!(rbf,rbfx,rbfy,rbfz,rij,params,N)
@@ -195,6 +216,53 @@ function radialbasis!(rbf,rbfx,rbfy,rbfz,rij,params,N)
         end
     end
 end
+
+function twobodydesc!(d2,rbf,tj,N, params)
+    nelements = length(params.species)    
+    nrbf2 = params.nrbf2
+    nl2 =nrbf2 * nelements 
+    
+    # initialize the two body descriptors 
+    for m in 1:nl2
+        d2[m] = 0.0
+    end
+
+    for m in 1:nrbf2
+        for n in 1:N
+            i2 = n + N*(m-1) # adjustment for 1-indexing
+            d2[m+nrbf2*(tj[n]-1)] += rbf[i2]
+        end
+   end
+end
+
+function peratombase_coefficients(cb,bd,ti,basis,coeff)
+    nCoeffPerElement = peratom_length(basis)
+    Mdesc = nCoeffPerElement - 1 # remove one-body term
+    nc = nCoeffPerElement*(ti[1]-1)
+
+    ei = coeff[1+nc] 
+    for m in 1:Mdesc
+        ei += coeff[1 + m + nc]*bd[m]
+        cb[m] = coeff[1 + m + nc]
+    end
+      return ei
+end
+
+function twobody_forces!(fij,cb2,rbfx,rbfy,rbfz,tj,Nj,nrbf2)
+    totalIterations = nrbf2*Nj
+    for idx in 0:totalIterations-1 # keeping this starting at 0 
+        n = idx ÷ nrbf2 + 1  # adjust for 1-indexing
+        m = mod(idx, nrbf2) + 1 # adjust for 1-indexing
+
+        i2 = n + Nj*(m-1) # n already had the 1-index adjustment
+        i1 = 3*(n-1) # don't do 1-indexing adjustmnet here, do it in the fij
+        c = cb2[m+nrbf2*(tj[n]-1)] # m already has the 1-index adjustment
+        fij[1+i1] += c*rbfx[i2] 
+        fij[2+i1] += c*rbfy[i2]
+        fij[3+i1] += c*rbfz[i2]
+   end
+end
+
 
 ### These functions below will be preferred later. For now, just stubs
 function compute_local_descriptors(sys, basis::PODBasis;
