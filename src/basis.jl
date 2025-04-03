@@ -101,8 +101,15 @@ end
 include("./pod_initialization.jl")
 
 mutable struct PODWorkspace
+    ### will never change 
+    pn3::Vector{Int64}
+    pq3::Vector{Int64}
+    pc3::Vector{Int64}
+    
     ### size is fixed by params
     bd::Vector{Float64} 
+    sumU::Vector{Float64}
+    tm::Vector{Float64}
 
     ### size is a function of nijmax
     bdd::Vector{Float64} # why does this change with Nij?
@@ -119,13 +126,35 @@ mutable struct PODWorkspace
     rbfyt::Vector{Float64}
     rbfzt::Vector{Float64}
 
+    U::Vector{Float64}
+    Ux::Vector{Float64}
+    Uy::Vector{Float64}
+    Uz::Vector{Float64}
+
+    abf::Vector{Float64}
+    abfx::Vector{Float64}
+    abfy::Vector{Float64}
+    abfz::Vector{Float64}
 end
 
 function initialize_workspace(params::PODParams)
     Mdesc = params.counts.nCoeffPerElement -1     
-    bd = Vector{Float64}(undef,Mdesc)
+    K3 = params.counts.K3
+    nrbf3 = params.nrbf3
+    nelements = params.counts.nelements
 
-    return PODWorkspace(bd,
+    pn3, pq3, pc3 = init3body(params)
+
+    bd = Vector{Float64}(undef,Mdesc)
+    sumU = Vector{Float64}(undef,K3*nrbf3*nelements)
+    tm   = Vector{Float64}(undef,4*K3)
+
+    return PODWorkspace(pn3,
+                        pq3,
+                        pc3,
+                        bd,
+                        sumU,
+                        tm,
                         Vector{Float64}(undef,0), #bdd
                         #Vector{Float64}(undef,0), # rbf
                         #Vector{Float64}(undef,0), # rbfx
@@ -134,7 +163,15 @@ function initialize_workspace(params::PODParams)
                         Vector{Float64}(undef,0), # rbft
                         Vector{Float64}(undef,0), # rbfxt
                         Vector{Float64}(undef,0), # rbfxy
-                        Vector{Float64}(undef,0)) # rbfxz
+                        Vector{Float64}(undef,0), # rbfxz
+                        Vector{Float64}(undef,0), # U 
+                        Vector{Float64}(undef,0), # Ux 
+                        Vector{Float64}(undef,0), # Uy 
+                        Vector{Float64}(undef,0), # Uz 
+                        Vector{Float64}(undef,0), # abf 
+                        Vector{Float64}(undef,0), # abfx 
+                        Vector{Float64}(undef,0), # abfy 
+                        Vector{Float64}(undef,0)) # abfz 
 end
 
 
@@ -171,6 +208,8 @@ function allocate_workspace!(basis::PODBasis,nijmax)
 
     params = basis.params
     nrbf2 = params.nrbf2
+    nrbf3 = params.nrbf3 
+    K3 = params.counts.K3
     ns = params.counts.ns
     Mdesc = params.counts.nCoeffPerElement - 1
 
@@ -187,6 +226,19 @@ function allocate_workspace!(basis::PODBasis,nijmax)
     workspace.rbfxt = Vector{Float64}(undef,ns*nijmax)
     workspace.rbfyt = Vector{Float64}(undef,ns*nijmax)
     workspace.rbfzt = Vector{Float64}(undef,ns*nijmax)
+    
+    # pretty sure nl3 > nl4 always...
+    if params.counts.nl3 > 0 || params.counts.nl4 > 0
+        workspace.U    = Vector{Float64}(undef,K3*nrbf3*nijmax)
+        workspace.Ux   = Vector{Float64}(undef,K3*nrbf3*nijmax)
+        workspace.Uy   = Vector{Float64}(undef,K3*nrbf3*nijmax)
+        workspace.Uz   = Vector{Float64}(undef,K3*nrbf3*nijmax)
+
+        workspace.abf  = Vector{Float64}(undef,K3*nijmax)
+        workspace.abfx = Vector{Float64}(undef,K3*nijmax)
+        workspace.abfy = Vector{Float64}(undef,K3*nijmax)
+        workspace.abfz = Vector{Float64}(undef,K3*nijmax)
+    end
 end
 
 function peratom_length(basis::PODBasis)
@@ -206,8 +258,11 @@ function peratomenergyforce2!(fij, rij,ti,tj,Nj,basis,coeff)
     nelements = counts.nCoeffPerElement
     
     nl2 = counts.nl2
+    nl3 = counts.nl3
     ns  = counts.ns 
     nrbf2 = basis.params.nrbf2
+    nrbf3 = basis.params.nrbf3 
+    K3 = counts.K3
 
     workspace = basis.workspace
 
@@ -222,33 +277,17 @@ function peratomenergyforce2!(fij, rij,ti,tj,Nj,basis,coeff)
         return coeff[nCoeffPerElement*(ti[0]-1)+1] # one-index adjustment
     end
     
-    # TODO Allocations that need to be pre-allocated for the GPU
-
-    # This logic only works for the 2-body, will update for 3-body/4-body
-    #d2 = bd = Vector{Float64}(undef,nl2)
-    #cb2 = cb = bdd = Vector{Float64}(undef, nl2)
     bd = workspace.bd
     d2 = view(bd,1:nl2)
 
     cb = workspace.bdd
     cb2 = view(cb,1:nl2) # why does bdd have Nj dependence
 
-    #rbf = Vector{Float64}(undef,Nj*basis.params.nrbf2)
-    #rbfx = Vector{Float64}(undef,Nj*basis.params.nrbf2)
-    #rbfy = Vector{Float64}(undef,Nj*basis.params.nrbf2)
-    #rbfz = Vector{Float64}(undef,Nj*basis.params.nrbf2)
-
-    #$rbft  = Vector{Float64}(undef,Nj*ns)
-    #$rbfxt = Vector{Float64}(undef,Nj*ns)
-    #$rbfyt = Vector{Float64}(undef,Nj*ns)
-    #$rbfzt = Vector{Float64}(undef,Nj*ns)
-
     rbft  = view(workspace.rbft,  1:Nj*ns)
     rbfxt = view(workspace.rbfxt, 1:Nj*ns)
     rbfyt = view(workspace.rbfyt, 1:Nj*ns)
     rbfzt = view(workspace.rbfzt, 1:Nj*ns)
-
-    
+ 
     radialbasis!(rbft,rbfxt,rbfyt,rbfzt,rij,basis.params,Nj)
     
     # Apologies, apologies... this will need to be updated for GPU
@@ -257,13 +296,27 @@ function peratomenergyforce2!(fij, rij,ti,tj,Nj,basis,coeff)
     rbfy = reshape( reshape(rbfyt, Nj, ns)*basis.Φ[:, 1:nrbf2],:)
     rbfz = reshape( reshape(rbfzt, Nj, ns)*basis.Φ[:, 1:nrbf2],:)
 
-    if nl2> 0 && Nj > 2 
+    if nl2 > 0 && Nj > 0 
         twobodydesc!(d2, rbf, tj, Nj, basis.params) # extra argument
+    end
+
+    if nl3 > 0  && Nj > 1
+        U  = view(workspace.U, 1:Nj*K3*nrbf3)
+        Ux = view(workspace.Ux, 1:Nj*K3*nrbf3)
+        Uy = view(workspace.Uy, 1:Nj*K3*nrbf3)
+        Uz = view(workspace.Uz, 1:Nj*K3*nrbf3)
+        sumU = workspace.sumU 
+
+        abf = view(workspace.abf, 1:Nj*K3)
+        abfx = view(workspace.abfx, 1:Nj*K3)
+        abfy = view(workspace.abfy, 1:Nj*K3)
+        abfz = view(workspace.abfz, 1:Nj*K3)
+        tm = workspace.tm
     end
 
     e +=  peratombase_coefficients(cb,bd,ti,basis.params,coeff) # two extra arguments
 
-    if nl2> 0 && Nj > 2 
+    if nl2 > 0 && Nj > 2 
         twobody_forces!(fij,cb2, rbfx, rbfy, rbfz, tj, Nj, nrbf2) # extra arguments
     end
 
