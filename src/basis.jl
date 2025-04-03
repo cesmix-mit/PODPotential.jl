@@ -5,6 +5,10 @@ struct PODParams
     besseldegree::Int64 #Pα
     inversedegree::Int64 #Pγ
     nrbf2::Int64
+    nrbf3::Int64
+    nrbf4::Int64
+    Pa3::Int64
+    Pa4::Int64
     ns::Int64
     # inner constructor will be needed to enforce Nr3 <=Nr2, etc.
     function PODParams(species::Vector{Symbol},
@@ -12,13 +16,18 @@ struct PODParams
                       rcut::Float64,
                       besseldegree::Int64,
                       inversedegree::Int64,
-                      nrbf2::Int64)
+                      nrbf2::Int64,
+                      nrbf3::Int64,
+                      nrbf4::Int64,
+                      Pa3::Int64,
+                      Pa4::Int64)
         # This is fixed
         Pβ = 3
         # number of snapshots
         ns = besseldegree*Pβ + inversedegree
 
-        new(species,rin,rcut,besseldegree,inversedegree,nrbf2,ns)
+        new(species,rin,rcut,besseldegree,inversedegree,
+            nrbf2,nrbf3, nrbf4, Pa3, Pa4, ns)
     end
 end       
 
@@ -35,21 +44,36 @@ struct PODBasis
    end
 end 
 
-function PODBasis(species, rin, rcut, besseldegree, inversedegree, Nr2)
-    params = PODParams(species, rin, rcut, besseldegree, inversedegree, Nr2)
+function PODBasis(species,rcut; 
+                  rin=1.0, 
+                  besseldegree=4, 
+                  inversedegree=8,
+                  nrbf2=8,
+                  nrbf3=6,
+                  nrbf4=0,
+                  Pa3=4,
+                  Pa4=0)
+    params = PODParams(species,rin,rcut,besseldegree, inversedegree,
+                       nrbf2, nrbf3, nrbf4, Pa3, Pa4)
     return PODBasis(params)
 end
-
 
 struct PODWorkspace
 end
 
 function peratom_length(basis::PODBasis)
+    nb_a4 = (1,2,4,7,11,16,23)
     nrbf2 = basis.params.nrbf2 
-    nelements = length(basis.params.species)
+    nrbf3 = basis.params.nrbf3 
+    nrbf4 = basis.params.nrbf4
+    nabf3 = basis.params.Pa3 + 1
+    nabf4 = nb_a4[basis.params.Pa4+1]
+    Ne = length(basis.params.species)
     
-    # one-body and two-body
-    return 1 + nrbf2*nelements
+    nl2 = nrbf2*Ne
+    nl3 = nabf3*nrbf3*Ne*(Ne+1)÷2
+    nl4 = nabf4*nrbf4*Ne*(Ne+1)*(Ne+2)÷6
+    return 1 + nl2 + nl3 + nl4
 end
 
 function Base.length(basis::PODBasis)

@@ -1,6 +1,6 @@
 Directly replicating LAMMPS logic of the ML-POD potential.
 
-Goal is 3-body, at most 4-body. Ignoring the quadratic descriptors.
+Goal is 3-body, at most 4-body. Ignoring the quadratic descriptors. 1-body always included.
 
 Not considering environment-dependent descriptors or Gaussian snapshots.
 

@@ -7,3 +7,4 @@ log.lammps
 # MacOS
 .DS_Store
 
+*.swp
