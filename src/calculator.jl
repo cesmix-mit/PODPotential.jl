@@ -18,17 +18,21 @@ struct LAMMPS_State
     ilist::Vector{Int64}
     numneigh::Vector{Int64}
     firstneigh::Vector{Vector{Int64}}
+    nlocal::Int64
+    nghost::Int64
 end
 
 function LAMMPS_State(jld_file::String)
-    x,type,map,inum,ilist,numneigh,firstneigh = load(jld_file,"x",
+    x,type,map,inum,ilist,numneigh,firstneigh,nlocal,nghost = load(jld_file,"x",
                                                               "type",
                                                               "map",
                                                               "inum",
                                                               "ilist",
                                                               "numneigh",
-                                                              "firstneigh")
-    return LAMMPS_State(x,type,map,inum,ilist,numneigh,firstneigh)
+                                                              "firstneigh",
+                                                              "nlocal",
+                                                              "nghost",)
+    return LAMMPS_State(x,type,map,inum,ilist,numneigh,firstneigh, nlocal, nghost)
 end
 
 

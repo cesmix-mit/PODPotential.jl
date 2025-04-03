@@ -7,5 +7,3 @@ log.lammps
 # MacOS
 .DS_Store
 
-*.jld2
-!./test/monoclinic_hfo2_lammps_state.jld2
