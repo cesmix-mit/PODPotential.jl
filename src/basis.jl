@@ -80,14 +80,54 @@ end
 
 include("./pod_initialization.jl")
 
+mutable struct PODWorkspace
+    ### size is fixed by params
+    bd::Vector{Float64} 
+
+    ### size is a function of nijmax
+    bdd::Vector{Float64} # why does this change with Nij?
+
+    # can de-comment when the rbft*phi matmul operation 
+    # is non-allocating and directly outputs flat array
+    #rbf::Vector{Float64}
+    #rbfx::Vector{Float64}
+    #rbfy::Vector{Float64}
+    #rbfz::Vector{Float64}
+
+    rbft::Vector{Float64}
+    rbfxt::Vector{Float64}
+    rbfyt::Vector{Float64}
+    rbfzt::Vector{Float64}
+
+end
+
+function initialize_workspace(params::PODParams)
+    Mdesc = params.counts.nCoeffPerElement -1     
+    bd = Vector{Float64}(undef,Mdesc)
+
+    return PODWorkspace(bd,
+                        Vector{Float64}(undef,0), #bdd
+                        #Vector{Float64}(undef,0), # rbf
+                        #Vector{Float64}(undef,0), # rbfx
+                        #Vector{Float64}(undef,0), # rbfy
+                        #Vector{Float64}(undef,0), # rbfz
+                        Vector{Float64}(undef,0), # rbft
+                        Vector{Float64}(undef,0), # rbfxt
+                        Vector{Float64}(undef,0), # rbfxy
+                        Vector{Float64}(undef,0)) # rbfxz
+end
+
+
 struct PODBasis
     params::PODParams
     Φ::Matrix{Float64}
+    workspace::PODWorkspace
 
     # inner constructor will be needed to enforce Nr3 <=Nr2, etc.
     function PODBasis(params)
         Φ = init2body(params)
-        return new(params,Φ)
+        workspace = initialize_workspace(params)
+        return new(params,Φ,workspace)
    end
 end 
 
@@ -105,7 +145,28 @@ function PODBasis(species,rcut;
     return PODBasis(params)
 end
 
-struct PODWorkspace
+
+function allocate_workspace!(basis::PODBasis,nijmax)
+    workspace = basis.workspace
+
+    params = basis.params
+    nrbf2 = params.nrbf2
+    ns = params.counts.ns
+    Mdesc = params.counts.nCoeffPerElement - 1
+
+    workspace.bdd = Vector{Float64}(undef,3*nijmax*Mdesc)
+
+    # can de-comment when the rbft*phi matmul operation 
+    # is non-allocating and directly outputs flat array
+    #workspace.rbf  = Vector{Float64}(undef,nrbf2*nijmax)
+    #workspace.rbfx = Vector{Float64}(undef,nrbf2*nijmax)
+    #workspace.rbfy = Vector{Float64}(undef,nrbf2*nijmax)
+    #workspace.rbfz = Vector{Float64}(undef,nrbf2*nijmax)
+
+    workspace.rbft  = Vector{Float64}(undef,ns*nijmax)
+    workspace.rbfxt = Vector{Float64}(undef,ns*nijmax)
+    workspace.rbfyt = Vector{Float64}(undef,ns*nijmax)
+    workspace.rbfzt = Vector{Float64}(undef,ns*nijmax)
 end
 
 function peratom_length(basis::PODBasis)
@@ -128,6 +189,8 @@ function peratomenergyforce2!(fij, rij,ti,tj,Nj,basis,coeff)
     ns  = counts.ns 
     nrbf2 = basis.params.nrbf2
 
+    workspace = basis.workspace
+
     # initialize energies and forces to 0.0
     e = 0.0
     for n in 1:3*Nj
@@ -142,17 +205,29 @@ function peratomenergyforce2!(fij, rij,ti,tj,Nj,basis,coeff)
     # TODO Allocations that need to be pre-allocated for the GPU
 
     # This logic only works for the 2-body, will update for 3-body/4-body
-    d2 = bd = Vector{Float64}(undef,nl2)
-    cb2 = cb = bdd = Vector{Float64}(undef, nl2)
+    #d2 = bd = Vector{Float64}(undef,nl2)
+    #cb2 = cb = bdd = Vector{Float64}(undef, nl2)
+    bd = workspace.bd
+    d2 = view(bd,1:nl2)
+
+    cb = workspace.bdd
+    cb2 = view(cb,1:nl2) # why does bdd have Nj dependence
+
     #rbf = Vector{Float64}(undef,Nj*basis.params.nrbf2)
     #rbfx = Vector{Float64}(undef,Nj*basis.params.nrbf2)
     #rbfy = Vector{Float64}(undef,Nj*basis.params.nrbf2)
     #rbfz = Vector{Float64}(undef,Nj*basis.params.nrbf2)
 
-    rbft = Vector{Float64}(undef,Nj*ns)
-    rbfxt = Vector{Float64}(undef,Nj*ns)
-    rbfyt = Vector{Float64}(undef,Nj*ns)
-    rbfzt = Vector{Float64}(undef,Nj*ns)
+    #$rbft  = Vector{Float64}(undef,Nj*ns)
+    #$rbfxt = Vector{Float64}(undef,Nj*ns)
+    #$rbfyt = Vector{Float64}(undef,Nj*ns)
+    #$rbfzt = Vector{Float64}(undef,Nj*ns)
+
+    rbft  = view(workspace.rbft,  1:Nj*ns)
+    rbfxt = view(workspace.rbfxt, 1:Nj*ns)
+    rbfyt = view(workspace.rbfyt, 1:Nj*ns)
+    rbfzt = view(workspace.rbfzt, 1:Nj*ns)
+
     
     radialbasis!(rbft,rbfxt,rbfyt,rbfzt,rij,basis.params,Nj)
     

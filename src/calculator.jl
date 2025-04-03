@@ -60,6 +60,8 @@ function lammps_compute(state::LAMMPS_State, podpot::POD_Potential)
             nijmax = jnum
         end
     end
+
+    allocate_workspace!(podpot.basis,nijmax)
     
     fij1 = Vector{Float64}(undef,3*nijmax)
     f    = zeros(Float64,size(x)) 
