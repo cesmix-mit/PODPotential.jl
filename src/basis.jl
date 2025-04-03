@@ -13,7 +13,7 @@ struct PODCounts
 end
 
 function initialize_counts(species, besseldegree, inversedegree, 
-                           nrbf2, nrbf3, nrbf4, Pa3,Pa4)
+                           nrbf2, nrbf3, nrbf4, P3,P4)
     # These values are fixed
     Pβ = 3
     npa = (0,1,4,10,20,35,56,84,120,165,220,286,364,455)
@@ -26,12 +26,12 @@ function initialize_counts(species, besseldegree, inversedegree,
     nelements = Ne = length(species)
 
     # number of angular basis functions
-    nabf3 = Pa3 + 1
-    nabf4 = nb[Pa4+1]
+    nabf3 = P3 + 1
+    nabf4 = nb[P4+1]
 
     #number of monomials
-    K3 = npa[Pa3+2]
-    K4 = npa[Pa4+2]
+    K3 = npa[P3+2]
+    K4 = npa[P4+2]
 
     # number of descriptors
     nl2 = nrbf2*Ne
@@ -55,11 +55,11 @@ struct PODParams
     nrbf2::Int64
     nrbf3::Int64
     nrbf4::Int64
-    Pa3::Int64
-    Pa4::Int64
+    P3::Int64
+    P4::Int64
     counts::PODCounts
 
-    # inner constructor will be needed to enforce Nr3 <=Nr2, etc.
+    # inner constructor
     function PODParams(species::Vector{Symbol},
                       rin::Float64,
                       rcut::Float64,
@@ -68,13 +68,33 @@ struct PODParams
                       nrbf2::Int64,
                       nrbf3::Int64,
                       nrbf4::Int64,
-                      Pa3::Int64,
-                      Pa4::Int64)
-        
+                      P3::Int64,
+                      P4::Int64)
+
+        if nrbf3 > nrbf2 
+            error("number of 3-body rbfs has to be <= number of 2-body rbfs")        
+        end
+
+        if nrbf4 > nrbf3
+            error("number of 3-body rbfs has to be <= number of 2-body rbfs")        
+        end
+
+        if P4 > P3 
+            error("4-body angular degree must be <= 3-body angular degree")
+        end
+
+        if P3 > 12 
+            error("3-body angular degree must be <=12")
+        end
+
+        if P4 > 6 
+            error("4-body angular degree must be <=6")
+        end
+
         counts = initialize_counts(species, besseldegree, inversedegree, 
-                                   nrbf2, nrbf3, nrbf4, Pa3,Pa4)
+                                   nrbf2, nrbf3, nrbf4, P3,P4)
         new(species,rin,rcut,besseldegree,inversedegree,
-            nrbf2,nrbf3, nrbf4, Pa3, Pa4, counts)
+            nrbf2,nrbf3, nrbf4, P3, P4, counts)
     end
 end       
 
@@ -138,10 +158,10 @@ function PODBasis(species,rcut;
                   nrbf2=8,
                   nrbf3=6,
                   nrbf4=0,
-                  Pa3=4,
-                  Pa4=0)
+                  P3=4,
+                  P4=0)
     params = PODParams(species,rin,rcut,besseldegree, inversedegree,
-                       nrbf2, nrbf3, nrbf4, Pa3, Pa4)
+                       nrbf2, nrbf3, nrbf4, P3, P4)
     return PODBasis(params)
 end
 

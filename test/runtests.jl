@@ -13,8 +13,8 @@ using BenchmarkTools
                         nrbf2=8,
                         nrbf3=0,
                         nrbf4=0,
-                        Pa3=0,
-                        Pa4=0)
+                        P3=0,
+                        P4=0)
     podpot = POD_Potential(podbasis,"./files/simple_2body_HfO2_coefficients.pod")
     lammps_state = LAMMPS_State("./files/monoclinic_hfo2_lammps_state.jld2")
     
@@ -39,8 +39,8 @@ podbasis = PODBasis([:Hf,:O], 5.5;
                     nrbf2=8,
                     nrbf3=0,
                     nrbf4=0,
-                    Pa3=0,
-                    Pa4=0)
+                    P3=0,
+                    P4=0)
 podpot = POD_Potential(podbasis,"./files/simple_2body_HfO2_coefficients.pod")
 lammps_state = LAMMPS_State("./files/monoclinic_hfo2_lammps_state.jld2")
 @benchmark lammps_compute(lammps_state,podpot)
