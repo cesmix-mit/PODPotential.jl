@@ -1,3 +1,51 @@
+#relevant counts used throughout the calculations
+struct PODCounts
+    nelements::Int64
+    ns::Int64
+    nabf3::Int64
+    nabf4::Int64
+    K3::Int64
+    K4::Int64
+    nl2::Int64
+    nl3::Int64
+    nl4::Int64
+    nCoeffPerElement::Int64
+end
+
+function initialize_counts(species, besseldegree, inversedegree, 
+                           nrbf2, nrbf3, nrbf4, Pa3,Pa4)
+    # These values are fixed
+    Pβ = 3
+    npa = (0,1,4,10,20,35,56,84,120,165,220,286,364,455)
+    nb  = (1,2,4,7,11,16,23)
+
+    # number of snapshots
+    ns = besseldegree*Pβ + inversedegree
+
+    #number of elements
+    nelements = Ne = length(species)
+
+    # number of angular basis functions
+    nabf3 = Pa3 + 1
+    nabf4 = nb[Pa4+1]
+
+    #number of monomials
+    K3 = npa[Pa3+2]
+    K4 = npa[Pa4+2]
+
+    # number of descriptors
+    nl2 = nrbf2*Ne
+    nl3 = nabf3*nrbf3*Ne*(Ne+1)÷2
+    nl4 = nabf4*nrbf4*Ne*(Ne+1)*(Ne+2)÷6
+    nCoeffPerElement = 1 + nl2 + nl3 + nl4
+
+    return PODCounts(nelements,ns,nabf3,nabf4,K3,K4,
+                     nl2,nl3,nl4,nCoeffPerElement)
+
+  
+end
+
+#parameters of the potentials
 struct PODParams
     species::Vector{Symbol}
     rin::Float64
@@ -9,7 +57,8 @@ struct PODParams
     nrbf4::Int64
     Pa3::Int64
     Pa4::Int64
-    ns::Int64
+    counts::PODCounts
+
     # inner constructor will be needed to enforce Nr3 <=Nr2, etc.
     function PODParams(species::Vector{Symbol},
                       rin::Float64,
@@ -21,13 +70,11 @@ struct PODParams
                       nrbf4::Int64,
                       Pa3::Int64,
                       Pa4::Int64)
-        # This is fixed
-        Pβ = 3
-        # number of snapshots
-        ns = besseldegree*Pβ + inversedegree
-
+        
+        counts = initialize_counts(species, besseldegree, inversedegree, 
+                                   nrbf2, nrbf3, nrbf4, Pa3,Pa4)
         new(species,rin,rcut,besseldegree,inversedegree,
-            nrbf2,nrbf3, nrbf4, Pa3, Pa4, ns)
+            nrbf2,nrbf3, nrbf4, Pa3, Pa4, counts)
     end
 end       
 
@@ -62,33 +109,24 @@ struct PODWorkspace
 end
 
 function peratom_length(basis::PODBasis)
-    nb_a4 = (1,2,4,7,11,16,23)
-    nrbf2 = basis.params.nrbf2 
-    nrbf3 = basis.params.nrbf3 
-    nrbf4 = basis.params.nrbf4
-    nabf3 = basis.params.Pa3 + 1
-    nabf4 = nb_a4[basis.params.Pa4+1]
-    Ne = length(basis.params.species)
-    
-    nl2 = nrbf2*Ne
-    nl3 = nabf3*nrbf3*Ne*(Ne+1)÷2
-    nl4 = nabf4*nrbf4*Ne*(Ne+1)*(Ne+2)÷6
-    return 1 + nl2 + nl3 + nl4
+    return basis.params.counts.nCoeffPerElement 
 end
 
 function Base.length(basis::PODBasis)
-    nelements = length(basis.params.species)
-    nCoeffPerElement = peratom_length(basis)
+    nelements = basis.params.counts.nelements
+    nCoeffPerElement = basis.params.counts.nCoeffPerElement
     return nelements*nCoeffPerElement
 end
 
 function peratomenergyforce2!(fij, rij,ti,tj,Nj,basis,coeff)
     
-    #TODO make another struct that keeps all these different counts and just pass that around instead of params
-    nCoeffPerElement = peratom_length(basis)
-    nelements = length(basis.params.species)
+    counts = basis.params.counts 
+    nCoeffPerElement = counts.nCoeffPerElement
+    nelements = counts.nCoeffPerElement
     
-    nl2 = basis.params.nrbf2 * nelements 
+    nl2 = counts.nl2
+    ns  = counts.ns 
+    nrbf2 = basis.params.nrbf2
 
     # initialize energies and forces to 0.0
     e = 0.0
@@ -111,27 +149,27 @@ function peratomenergyforce2!(fij, rij,ti,tj,Nj,basis,coeff)
     #rbfy = Vector{Float64}(undef,Nj*basis.params.nrbf2)
     #rbfz = Vector{Float64}(undef,Nj*basis.params.nrbf2)
 
-    rbft = Vector{Float64}(undef,Nj*basis.params.ns)
-    rbfxt = Vector{Float64}(undef,Nj*basis.params.ns)
-    rbfyt = Vector{Float64}(undef,Nj*basis.params.ns)
-    rbfzt = Vector{Float64}(undef,Nj*basis.params.ns)
+    rbft = Vector{Float64}(undef,Nj*ns)
+    rbfxt = Vector{Float64}(undef,Nj*ns)
+    rbfyt = Vector{Float64}(undef,Nj*ns)
+    rbfzt = Vector{Float64}(undef,Nj*ns)
     
     radialbasis!(rbft,rbfxt,rbfyt,rbfzt,rij,basis.params,Nj)
     
     # Apologies, apologies... this will need to be updated for GPU
-    rbf =  reshape( reshape(rbft, Nj, basis.params.ns)*basis.Φ[:, 1:basis.params.nrbf2], :)
-    rbfx = reshape( reshape(rbfxt, Nj, basis.params.ns)*basis.Φ[:, 1:basis.params.nrbf2],:)
-    rbfy = reshape( reshape(rbfyt, Nj, basis.params.ns)*basis.Φ[:, 1:basis.params.nrbf2],:)
-    rbfz = reshape( reshape(rbfzt, Nj, basis.params.ns)*basis.Φ[:, 1:basis.params.nrbf2],:)
+    rbf =  reshape( reshape(rbft, Nj, ns)*basis.Φ[:, 1:nrbf2], :)
+    rbfx = reshape( reshape(rbfxt, Nj, ns)*basis.Φ[:, 1:nrbf2],:)
+    rbfy = reshape( reshape(rbfyt, Nj, ns)*basis.Φ[:, 1:nrbf2],:)
+    rbfz = reshape( reshape(rbfzt, Nj, ns)*basis.Φ[:, 1:nrbf2],:)
 
     if nl2> 0 && Nj > 2 
         twobodydesc!(d2, rbf, tj, Nj, basis.params) # extra argument
     end
 
-    e +=  peratombase_coefficients(cb,bd,ti,basis,coeff) # two extra arguments
+    e +=  peratombase_coefficients(cb,bd,ti,basis.params,coeff) # two extra arguments
 
     if nl2> 0 && Nj > 2 
-        twobody_forces!(fij,cb2, rbfx, rbfy, rbfz, tj, Nj, basis.params.nrbf2) # extra arguments
+        twobody_forces!(fij,cb2, rbfx, rbfy, rbfz, tj, Nj, nrbf2) # extra arguments
     end
 
     return e
@@ -242,9 +280,9 @@ function radialbasis!(rbf,rbfx,rbfy,rbfz,rij,params,N)
 end
 
 function twobodydesc!(d2,rbf,tj,N, params)
-    nelements = length(params.species)    
+    nelements = params.counts.nelements
     nrbf2 = params.nrbf2
-    nl2 =nrbf2 * nelements 
+    nl2 = params.counts.nl2
     
     # initialize the two body descriptors 
     for m in 1:nl2
@@ -259,8 +297,8 @@ function twobodydesc!(d2,rbf,tj,N, params)
    end
 end
 
-function peratombase_coefficients(cb,bd,ti,basis,coeff)
-    nCoeffPerElement = peratom_length(basis)
+function peratombase_coefficients(cb,bd,ti,params,coeff)
+    nCoeffPerElement = params.counts.nCoeffPerElement
     Mdesc = nCoeffPerElement - 1 # remove one-body term
     nc = nCoeffPerElement*(ti[1]-1)
 

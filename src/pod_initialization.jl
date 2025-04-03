@@ -9,7 +9,7 @@ end
 
 # initialization only, can be done on CPU
 function eigenvaluedecomposition!(N,params)
-    ns = params.ns    
+    ns = params.counts.ns    
     rin = params.rin
     rcut = params.rcut
 
@@ -21,7 +21,7 @@ function eigenvaluedecomposition!(N,params)
     snapshots!(S,xij,N, params)
     
     # convert to a matrix for simplicity
-    S = reshape(S,N,params.ns)
+    S = reshape(S,N,ns)
 
     # Compute S^TS (i.e. covariance matrix) 
     A = (1/N).*(S'*S)
