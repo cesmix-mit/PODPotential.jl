@@ -110,6 +110,8 @@ mutable struct PODWorkspace
     bd::Vector{Float64} 
     sumU::Vector{Float64}
     tm::Vector{Float64}
+    forcecoeff::Vector{Float64}
+    elemindex::Vector{Int64}
 
     ### size is a function of nijmax
     bdd::Vector{Float64} # why does this change with Nij?
@@ -141,13 +143,25 @@ function initialize_workspace(params::PODParams)
     Mdesc = params.counts.nCoeffPerElement -1     
     K3 = params.counts.K3
     nrbf3 = params.nrbf3
-    nelements = params.counts.nelements
+    nelements = Ne = params.counts.nelements
 
     pn3, pq3, pc3 = init3body(params)
 
     bd = Vector{Float64}(undef,Mdesc)
     sumU = Vector{Float64}(undef,K3*nrbf3*nelements)
     tm   = Vector{Float64}(undef,4*K3)
+    forcecoeff = Vector{Float64}(undef,nelements*K3*nrbf3)
+
+    # keeping elemindex 0-indexed because of how it's used downstream
+    elemindex = Vector{Int64}(undef,nelements*nelements)
+    k=0
+    for i1 in 1:nelements
+        for i2 in i1:nelements
+            elemindex[i2 + Ne*(i1-1)] = k
+            elemindex[i1 + Ne*(i2-1)] = k
+            k += 1
+        end
+    end
 
     return PODWorkspace(pn3,
                         pq3,
@@ -155,6 +169,8 @@ function initialize_workspace(params::PODParams)
                         bd,
                         sumU,
                         tm,
+                        forcecoeff,
+                        elemindex,
                         Vector{Float64}(undef,0), #bdd
                         #Vector{Float64}(undef,0), # rbf
                         #Vector{Float64}(undef,0), # rbfx
@@ -255,7 +271,7 @@ function peratomenergyforce2!(fij, rij,ti,tj,Nj,basis,coeff)
     
     counts = basis.params.counts 
     nCoeffPerElement = counts.nCoeffPerElement
-    nelements = counts.nCoeffPerElement
+    nelements = counts.nelements
     
     nl2 = counts.nl2
     nl3 = counts.nl3
@@ -312,12 +328,30 @@ function peratomenergyforce2!(fij, rij,ti,tj,Nj,basis,coeff)
         abfy = view(workspace.abfy, 1:Nj*K3)
         abfz = view(workspace.abfz, 1:Nj*K3)
         tm = workspace.tm
+
+        d3 = view(bd,nl2+1:nl2+nl3)
+        cb3 = view(cb,nl2+1:nl2+nl3)
+
+        angularbasis!(abf, abfx, abfy, abfz, rij, tm, workspace.pq3, Nj, K3)
+
+        radialangularbasis!(sumU,U,Ux,Uy,Uz,rbf,rbfx,rbfy,rbfz,
+                            abf,abfx,abfy,abfz,tj,Nj,K3,nrbf3,nelements)
+
+        threebodydesc!(d3,sumU, workspace.pn3, workspace.pc3, basis.params)
     end
 
     e +=  peratombase_coefficients(cb,bd,ti,basis.params,coeff) # two extra arguments
 
     if nl2 > 0 && Nj > 2 
         twobody_forces!(fij,cb2, rbfx, rbfy, rbfz, tj, Nj, nrbf2) # extra arguments
+    end
+
+    if nl3 > 0 && Nj > 1
+        for i in eachindex(workspace.forcecoeff)
+            workspace.forcecoeff[i] = 0.0
+        end
+        threebody_forcecoeff!(workspace.forcecoeff,cb3,sumU,workspace.pn3, workspace.pc3, workspace.elemindex, basis.params)
+        allbody_forces!(fij,workspace.forcecoeff,Ux,Uy,Uz,tj,Nj,basis.params)
     end
 
     return e
@@ -445,6 +479,198 @@ function twobodydesc!(d2,rbf,tj,N, params)
    end
 end
 
+function angularbasis!(abf, abfx, abfy, abfz, rij, tm, pq, N, K)
+
+    tm0 = view(tm,1:K)
+    tmu = view(tm,K+1:2K)
+    tmv = view(tm,2K+1:3K)
+    tmw = view(tm,3K+1:4K)
+    
+    # Initialize first angular basis function and its derivatives
+    tm0[1] = 1.0
+    tmu[1] = 0.0
+    tmv[1] = 0.0
+    tmw[1] = 0.0
+
+    # loop over all neighboring atoms
+    for j in 1:N
+        #Calculate relative positions of neighboring atoms and atom i
+        x = rij[1+3*(j-1)]
+        y = rij[2+3*(j-1)]
+        z = rij[3+3*(j-1)]
+
+        # Calculate various terms for derivatives
+        xx = x*x
+        yy = y*y
+        zz = z*z
+        xy = x*y
+        xz = x*z
+        yz = y*z
+
+        # Calculate distance between neighboring atoms and unit vectors
+        dij = sqrt(xx + yy + zz)
+        u = x/dij
+        v = y/dij
+        w = z/dij
+
+        # Calculate derivatives of unit vectors
+        dij3 = dij*dij*dij
+        dudx = (yy+zz)/dij3
+        dudy = -xy/dij3
+        dudz = -xz/dij3
+
+        dvdx = -xy/dij3
+        dvdy = (xx+zz)/dij3
+        dvdz = -yz/dij3
+
+        dwdx = -xz/dij3
+        dwdy = -yz/dij3
+        dwdz = (xx+yy)/dij3
+
+        #Initialize first angular basis function and its derivatives
+        abf[j] = tm0[1]
+        abfx[j] = 0.0
+        abfy[j] = 0.0
+        abfz[j] = 0.0
+
+        for n in 2:K # was n=1, n<K
+            m = pq[n] # this is an index. Was pq[n] -1
+            d = pq[n+K] # this is used as a switch flag
+
+            if d==1
+                tm[n] = tm[m]*u
+                tmu[n] = tmu[m]*u + tm[m]
+                tmv[n] = tmv[m]*u
+                tmw[n] = tmw[m]*u
+            end
+
+            if d==2
+                tm[n] = tm[m]*v
+                tmu[n] = tmu[m]*v
+                tmv[n] = tmv[m]*v + tm[m]
+                tmw[n] = tmw[m]*v
+            end
+            
+            if d==3
+                tm[n] = tm[m]*w
+                tmu[n] = tmu[m]*w
+                tmv[n] = tmv[m]*w
+                tmw[n] = tmw[m]*w + tm[m]
+            end
+
+            abf[j + N*(n-1)] = tm[n]
+            abfx[j + N*(n-1)] = tmu[n]*dudx + tmv[n]*dvdx + tmw[n]*dwdx
+            abfy[j + N*(n-1)] = tmu[n]*dudy + tmv[n]*dvdy + tmw[n]*dwdy
+            abfz[j + N*(n-1)] = tmu[n]*dudz + tmv[n]*dvdz + tmw[n]*dwdz
+        end
+    end
+end
+
+function radialangularbasis!(sumU,U,Ux,Uy,Uz,rbf,rbfx,rbfy,rbfz,
+                             abf,abfx,abfy,abfz,atomtype,N,K,M,Ne)
+    for i in eachindex(sumU)
+        sumU[i] = 0.0
+    end
+
+    #Calculate radial-angular basis functions
+    if Ne == 1 # 1-element case (TODO: test)
+        for m in 1:M
+            for k in 1:K
+                sum = 0.0
+                for n in 1:N
+                    ia = n + N*(k-1)
+                    ib = n + N*(m-1)
+                    ii = ia + N*K*(m-1)
+
+                    #Calculate c1 and c2
+                    c1 = rbf[ib]
+                    c2 = abf[ia]
+
+                    #Calculate U, Ux, Uy, Uz
+                    U[ii] = c1 * c2
+                    Ux[ii] = abfx[ia] * c1 + c2 * rbfx[ib]
+                    Uy[ii] = abfy[ia] * c1 + c2 * rbfy[ib]
+                    Uz[ii] = abfz[ia] * c1 + c2 * rbfz[ib]
+
+                    #Update sum
+                    sum += c1*c2
+                end
+                #Update sumU
+                sumU[k+K*(m-1)] += sum
+            end
+        end
+    else # for multi-element case
+        for m in 1:M
+            for k in 1:K
+                for n in 1:N
+                    ia = n + N*(k-1)
+                    ib = n + N*(m-1)
+                    ii = ia + N*K*(m-1)
+
+                    # Calculate c1 and c2
+                    c1 = rbf[ib]
+                    c2 = abf[ia]
+
+                    # Calculate U, Ux, Uy, Uz
+                    U[ii] = c1*c2
+                    Ux[ii] = abfx[ia]*c1 + c2*rbfx[ib]
+                    Uy[ii] = abfy[ia]*c1 + c2*rbfy[ib]
+                    Uz[ii] = abfz[ia]*c1 + c2*rbfz[ib]
+
+                    # Update sumU with atomtype adjustment
+                    tn = atomtype[n] # do not offset since atomtype is already 1-based
+                    sumU[tn+Ne*(k-1)+Ne*K*(m-1)] += c1*c2
+                end
+            end
+        end
+    end
+end
+
+function threebodydesc!(d3, sumU, pn3, pc3, params)
+    nelements = params.counts.nelements
+    nabf3 = params.counts.nabf3
+    nrbf3 = params.nrbf3
+    K3 = params.counts.K3
+    Me = nelements*(nelements+1)÷2
+
+    for m in 1:nabf3*nrbf3*Me
+        d3[m] = 0.0
+    end
+
+    if nelements == 1 #TODO test this 
+        for m in 1:nrbf3
+            for p in 1:nabf3
+                 n1 = pn3[p]+1
+                 n2 = pn3[p+1]+1
+                 nn = n2 - n1
+                for q in 0:nn-1
+                    t1 = pc3[n1+q]*sumU[(n1+q) + K3*(m-1)]
+                    d3[p + nabf3*(m-1)] += t1*sumU[(n1+q) + K3*(m-1)]
+                end
+            end
+        end
+    else
+        for m in 1:nrbf3
+            for p in 1:nabf3
+                n1 = pn3[p]+1
+                n2 = pn3[p+1]+1
+                nn = n2 - n1
+                for q in 0:nn-1
+                    k = 0
+                    for i1 in 1:nelements
+                        t1 = pc3[n1+q]*sumU[i1 + nelements*(n1+q-1) + nelements*K3*(m-1)]
+                        for i2 in i1:nelements
+                            d3[p + nabf3*(m-1) + nabf3*nrbf3*k] += t1*sumU[i2 + nelements*(n1+q-1) + nelements*K3*(m-1)]
+                            k += 1
+                        end
+                    end
+                end
+            end 
+        end
+    end
+end
+
+
 function peratombase_coefficients(cb,bd,ti,params,coeff)
     nCoeffPerElement = params.counts.nCoeffPerElement
     Mdesc = nCoeffPerElement - 1 # remove one-body term
@@ -473,6 +699,76 @@ function twobody_forces!(fij,cb2,rbfx,rbfy,rbfz,tj,Nj,nrbf2)
    end
 end
 
+function threebody_forcecoeff!(fb3,cb3,sumU,pn3,pc3,elemindex,params)
+    nelements = params.counts.nelements
+    nabf3 = params.counts.nabf3
+    nrbf3 = params.nrbf3
+    K3 = params.counts.K3
+
+    if nelements==1 # TODO Test this case
+        for m in 1:nrbf3
+            for p in 1:nabf3
+                c3 = 2.0 * cb3[p + nabf3*(m-1)]
+                n1 = pn3[p]+1
+                n2 = pn3[p + 1]+1
+                nn = n2 - n1
+                idxU = K3*(m-1)
+                for q in 0:nn-1
+                  k = n1 + q
+                  fb3[k + idxU] += c3*pc3[k]*sumU[k + idxU]
+                end
+            end
+        end
+    else
+        N3 = nabf3 * nrbf3
+        for m in 1:nrbf3
+            for p in 1:nabf3
+                n1 = pn3[p]+1
+                n2 = pn3[p + 1]+1
+                nn = n2 - n1
+                jmp = p + nabf3*(m-1)
+                for q in 0:nn-1
+                    k = n1 + q  #Combine n1 and q into a single index
+                    idxU = nelements*(k-1) + nelements*K3*(m-1)
+                    for i1 in 1:nelements
+                        tm = pc3[k]*sumU[i1 + idxU]
+                        for i2 in i1:nelements
+                            em = elemindex[i2+nelements*(i1-1)]
+                            t1 = tm*cb3[jmp+N3*em] #em is 0-indexed, jmp has p which is 1-indexed
+                            fb3[i2+idxU] += t1
+                            fb3[i1+idxU] += pc3[k]*cb3[jmp+N3*em]*sumU[i2+idxU]
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+function allbody_forces!(fij,forcecoeff,Ux,Uy,Uz,tj,Nj,params)
+    nrbf3 = params.nrbf3
+    K3 = params.counts.K3
+    nelements = params.counts.nelements
+    for j in 1:Nj
+        i2 = tj[j] # don't subtract 1, keep 1-indexed
+        fx = 0.0
+        fy = 0.0
+        fz = 0.0
+        for m in 1:nrbf3
+            for k in 1:K3
+                fc = forcecoeff[i2+nelements*(k-1)+nelements*K3*(m-1)]
+                idxU = j + Nj*(k-1) + Nj*K3*(m-1)  #Pre-compute the index for abf
+                fx += fc * Ux[idxU] 
+                fy += fc * Uy[idxU]
+                fz += fc * Uz[idxU]
+            end
+        end
+        baseIdx = 3*(j-1)
+        fij[baseIdx+1] += fx
+        fij[baseIdx+2] += fy
+        fij[baseIdx+3] += fz
+    end
+end
 
 ### These functions below will be preferred later. For now, just stubs
 function compute_local_descriptors(sys, basis::PODBasis;

@@ -586,14 +586,14 @@ function init3bodyarray!(np, pq, pc, Pa)
     (0, 0, 12, 364, 3, 1)]
 
     for i in 1:Pa+2
-        np[i] = npa[i];
+        np[i] = npa[i]
     end
 
-    nmax = np[Pa+2];
+    nmax = np[Pa+2]
 
     for i in 1:nmax
-        pq[i]        = poly[i][3];
-        pq[i+nmax]   = poly[i][4];
-        pc[i]        = poly[i][5];
+        pq[i]        = poly[i][4]
+        pq[i+nmax]   = poly[i][5]
+        pc[i]        = poly[i][6]
     end
 end

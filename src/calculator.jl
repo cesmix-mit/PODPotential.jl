@@ -67,6 +67,7 @@ function lammps_compute(state::LAMMPS_State, podpot::POD_Potential)
     f    = zeros(Float64,size(x)) 
     
     pot_energy = 0.0 
+    forcecoeff = nothing
     for ii in 1:inum
         i = ilist[ii] + 1 # pre-adjust to 1-indexing
         jnum = numneigh[i]
