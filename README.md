@@ -9,6 +9,3 @@ For now, not using the InteratomicPotentials.jl interface, but will eventually (
 Will need to satisfy the most basic version of the AtomsCalculators.jl interface to be compatible with Molly.jl. 
 
 However, intial focus is to take arrays dumped from lammps and directly pass them to routines ported here, to facilitate GPU performance comparison.
-
-TODO:
-- Pre-allocate
